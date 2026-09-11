@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="ko">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>구역지도 연결 테스트</title>
+  <link rel="stylesheet"
+    href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/openlayers/openlayers.github.io@master/en/v6.4.3/css/ol.css">
+  <script src="https://code.jquery.com/jquery-2.1.1.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/gh/openlayers/openlayers.github.io@master/en/v6.4.3/build/ol.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/proj4js/2.4.4/proj4.js"></script>
+  <style>
+    :root {
+      --ink: #1d2a33;
+      --muted: #6b7780;
+      --ok: #1f6f5c;
+      --fail: #b3261e;
+      --wait: #a0a8ae;
+      --paper: #ffffff;
+    }
+
+    html,
+    body {
+      margin: 0;
+      height: 100%;
+      font-family: "Pretendard", system-ui, sans-serif;
+      color: var(--ink);
+    }
+
+    #map {
+      position: absolute;
+      inset: 0;
+      background: #e9eef0;
+    }
+
+    #panel {
+      position: absolute;
+      top: 16px;
+      left: 16px;
+      z-index: 10;
+      width: 320px;
+      background: var(--paper);
+      border-radius: 10px;
+      padding: 18px 20px 14px;
+      box-shadow: 0 2px 14px rgba(29, 42, 51, .18);
+    }
+
+    #panel h1 {
+      font-size: 17px;
+      font-weight: 700;
+      margin: 0 0 12px;
+    }
+
+    #checks {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+    }
+
+    #checks li {
+      display: grid;
+      grid-template-columns: 58px 1fr;
+      gap: 8px;
+      padding: 7px 0;
+      border-top: 1px solid #eef1f3;
+      font-size: 14px;
+      line-height: 1.45;
+    }
+
+    #checks li:first-child {
+      border-top: 0;
+    }
+
+    .state {
+      font-weight: 700;
+      font-size: 13px;
+    }
+
+    .wait .state {
+      color: var(--wait);
+    }
+
+    .ok .state {
+      color: var(--ok);
+    }
+
+    .fail .state {
+      color: var(--fail);
+    }
+
+    .detail {
+      display: block;
+      color: var(--muted);
+      font-size: 12.5px;
+      margin-top: 2px;
+    }
+
+    #hint {
+      font-size: 12.5px;
+      color: var(--muted);
+      margin: 10px 0 0;
+      line-height: 1.5;
+    }
+
+    @media (max-width:600px) {
+      #panel {
+        top: auto;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        width: auto;
+        border-radius: 12px 12px 0 0;
+      }
+    }
+  </style>
+</head>
+
+<body>
+  <div id="map"></div>
+  <aside id="panel">
+    <h1>구역지도 연결 테스트</h1>
+    <ol id="checks"></ol>
+    <p id="hint">모든 항목이 끝나면 이 화면 전체를 캡처해서 보내주세요.</p>
+  </aside>
+
+  <script>
+    // ▼ 발급받은 인증키를 따옴표 안에 붙여넣으세요
+    const NGII_KEY = "E06F5B8DFAF6821B9B51CF9F4496176B400EAB16D8";
+
+    const CHECKS = [
+      ["lib", "기본 도구 불러오기"],
+      ["script", "국토정보플랫폼 지도 스크립트 (https)"],
+      ["map", "배경지도 만들기"],
+      ["ol", "지도 위에 구역을 올릴 수 있는 구조"],
+      ["tiles", "배경지도 이미지 받기 (인증키·주소 확인)"],
+      ["overlay", "시험 표시 올리기 (서울시청)"]
+    ];
+    const LABEL = { wait: "확인 중", ok: "통과", fail: "실패" };
+
+    const list = document.getElementById("checks");
+    CHECKS.forEach(([key, text]) => {
+      const li = document.createElement("li");
+      li.id = "c-" + key;
+      li.className = "wait";
+      li.innerHTML = '<span class="state">' + LABEL.wait + '</span><span>' + text + '<span class="detail"></span></span>';
+      list.appendChild(li);
+    });
+
+    function set(key, state, detail) {
+      const li = document.getElementById("c-" + key);
+      li.className = state;
+      li.querySelector(".state").textContent = LABEL[state];
+      li.querySelector(".detail").textContent = detail || "";
+    }
+    function stopRest(fromKey, reason) {
+      let hit = false;
+      CHECKS.forEach(([key]) => {
+        if (key === fromKey) { hit = true; return; }
+        if (hit) set(key, "fail", reason);
+      });
+    }
+
+    // 1. 기본 도구
+    const missing = [];
+    if (!window.jQuery) missing.push("jQuery");
+    if (!window.ol) missing.push("OpenLayers");
+    if (!window.proj4) missing.push("proj4");
+
+    if (missing.length) {
+      set("lib", "fail", "불러오지 못함: " + missing.join(", "));
+      stopRest("lib", "앞 단계 실패로 건너뜀");
+    } else if (NGII_KEY.indexOf("여기에") === 0) {
+      set("lib", "ok");
+      set("script", "fail", "코드 맨 위에 인증키를 아직 넣지 않았습니다.");
+      stopRest("script", "앞 단계 실패로 건너뜀");
+    } else {
+      set("lib", "ok");
+      loadNgii();
+    }
+
+    // 2. 국토정보플랫폼 스크립트
+    function loadNgii() {
+      const s = document.createElement("script");
+      s.src = "https://map.ngii.go.kr/openapi/wmts_ngiiMap_v6.4.3.js?apikey=" + encodeURIComponent(NGII_KEY);
+      s.onload = afterScript;
+      s.onerror = function () {
+        set("script", "fail", "https 주소로 받지 못했습니다. 브이월드로 전환을 검토해야 합니다.");
+        stopRest("script", "앞 단계 실패로 건너뜀");
+      };
+      document.head.appendChild(s);
+    }
+
+    function afterScript() {
+      if (typeof ngii_wmts === "undefined") {
+        set("script", "fail", "파일은 받았지만 지도 기능이 없습니다. 인증키가 거부됐을 수 있습니다.");
+        stopRest("script", "앞 단계 실패로 건너뜀");
+        return;
+      }
+      set("script", "ok");
+
+      // 3. 배경지도 만들기
+      let ngMap;
+      try {
+        ngMap = new ngii_wmts.map("map", { mapMode: 11 });
+        set("map", "ok");
+      } catch (e) {
+        set("map", "fail", e.message);
+        stopRest("map", "앞 단계 실패로 건너뜀");
+        return;
+      }
+
+      // 4. 내부 OpenLayers 지도 찾기
+      let olMap = null;
+      for (const k in ngMap) {
+        try { if (ngMap[k] instanceof ol.Map) { olMap = ngMap[k]; break; } } catch (e) { }
+      }
+      if (!olMap) {
+        set("ol", "fail", "내부 지도에 접근하지 못했습니다. 다른 연결 방식이 필요합니다.");
+        set("tiles", "wait", "화면에 지도 그림이 보이는지 눈으로 확인해 주세요.");
+        set("overlay", "fail", "앞 단계 실패로 건너뜀");
+        return;
+      }
+      const proj = olMap.getView().getProjection();
+      set("ol", "ok", "좌표계: " + proj.getCode());
+
+      // 5. 타일 수신 확인
+      let okCount = 0, badCount = 0;
+      function updateTiles() {
+        if (okCount > 0) set("tiles", "ok", "받음 " + okCount + "장" + (badCount ? " / 실패 " + badCount + "장" : ""));
+        else if (badCount > 0) set("tiles", "fail", "모두 실패(" + badCount + "장). 등록한 사이트 주소와 지금 주소가 다를 수 있습니다.");
+      }
+      olMap.getLayers().forEach(function (layer) {
+        const src = layer.getSource && layer.getSource();
+        if (src && src.getTileGrid && src.on) {
+          src.on("tileloadend", function () { okCount++; updateTiles(); });
+          src.on("tileloaderror", function () { badCount++; updateTiles(); });
+        }
+      });
+      setTimeout(function () {
+        if (okCount === 0 && badCount === 0) set("tiles", "fail", "10초 동안 응답이 없습니다.");
+      }, 10000);
+
+      // 6. 시험 표시 (서울시청 주변 2km 사각형 + 점)
+      try {
+        proj4.defs("EPSG:5179", "+proj=tmerc +lat_0=38 +lon_0=127.5 +k=0.9996 +x_0=1000000 +y_0=2000000 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs");
+        if (ol.proj.proj4 && ol.proj.proj4.register) ol.proj.proj4.register(proj4);
+
+        const p = ol.proj.transform([126.9780, 37.5665], "EPSG:4326", proj);
+        const square = new ol.Feature(ol.geom.Polygon.fromExtent([p[0] - 1000, p[1] - 1000, p[0] + 1000, p[1] + 1000]));
+        const dot = new ol.Feature(new ol.geom.Point(p));
+
+        const layer = new ol.layer.Vector({
+          zIndex: 999,
+          source: new ol.source.Vector({ features: [square, dot] }),
+          style: new ol.style.Style({
+            fill: new ol.style.Fill({ color: "rgba(31,111,92,0.25)" }),
+            stroke: new ol.style.Stroke({ color: "#1f6f5c", width: 2 }),
+            image: new ol.style.Circle({
+              radius: 7,
+              fill: new ol.style.Fill({ color: "#1f6f5c" }),
+              stroke: new ol.style.Stroke({ color: "#ffffff", width: 2 })
+            })
+          })
+        });
+        olMap.addLayer(layer);
+        olMap.getView().fit([p[0] - 6000, p[1] - 6000, p[0] + 6000, p[1] + 6000], { duration: 0 });
+        set("overlay", "ok", "초록 사각형이 서울시청 위에 있는지 확인해 주세요.");
+      } catch (e) {
+        set("overlay", "fail", e.message);
+      }
+    }
+  </script>
+</body>
+
+</html>
