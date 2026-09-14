@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>배경지도 진단 3차</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css">
+<style>
+  :root { --ink:#1d2a33; --muted:#66727b; --ok:#1f6f5c; --fail:#b3261e; --line:#e3e8eb; }
+  body { margin:0; padding:20px; font-family:"Pretendard", system-ui, sans-serif; color:var(--ink); background:#f6f8f9; }
+  .card { max-width:760px; margin:0 auto; background:#fff; border-radius:12px; padding:20px; box-shadow:0 2px 14px rgba(29,42,51,.12); }
+  h1 { font-size:19px; margin:0 0 4px; }
+  p.sub { font-size:13px; color:var(--muted); margin:0 0 16px; line-height:1.55; }
+  h2 { font-size:14px; margin:18px 0 8px; padding-top:14px; border-top:1px solid var(--line); }
+  pre { background:#f3f6f7; border-radius:8px; padding:12px; font-size:12px; line-height:1.6; white-space:pre-wrap; word-break:break-all; margin:0; max-height:340px; overflow:auto; }
+  button { font:inherit; font-size:13.5px; font-weight:600; padding:9px 14px; border:1px solid var(--ok); color:var(--ok); background:#fff; border-radius:7px; cursor:pointer; margin-top:14px; }
+  .grid { display:flex; flex-wrap:wrap; gap:6px; margin-top:4px; }
+  .chip { font-size:12px; padding:4px 8px; border-radius:6px; border:1px solid var(--line); }
+  .chip.ok { border-color:var(--ok); color:var(--ok); }
+  .chip.no { border-color:#e6c9c6; color:var(--fail); }
+  .shots { display:flex; gap:8px; flex-wrap:wrap; margin-top:8px; }
+  .shots figure { margin:0; text-align:center; font-size:11px; color:var(--muted); }
+  .shots img { width:120px; height:120px; object-fit:cover; border:1px solid var(--line); border-radius:6px; background:#eee; display:block; }
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>배경지도 진단 3차</h1>
+  <p class="sub">어떤 배경지도 이름과 어떤 확대 단계가 실제로 받아지는지 하나씩 확인합니다. 30초쯤 걸립니다.</p>
+
+  <h2>1. 배경지도 이름별 (확대 단계 L14)</h2>
+  <div class="grid" id="byLayer"></div>
+
+  <h2>2. 확대 단계별 (영상지도 기준)</h2>
+  <div class="grid" id="byLevel"></div>
+
+  <h2>3. 받아온 그림 미리보기</h2>
+  <div class="shots" id="shots"></div>
+
+  <h2>4. 지도 규격 정보</h2>
+  <pre id="caps">확인 중…</pre>
+
+  <h2>5. 요약</h2>
+  <pre id="out">확인 중…</pre>
+  <button id="copy" type="button">진단 내용 복사</button>
+</div>
+
+<script>
+// ▼ 국토정보플랫폼 인증키를 따옴표 안에 붙여넣으세요
+const NGII_KEY = "여기에_인증키를_붙여넣으세요";
+
+const LAYERS = ["white_map","korean_map","baseMap","base_map","education_map","largefont_map","nighttime_map","satellite_map","hybrid_map","boundary_map","air_map"];
+// 서울시청 기준 타일 좌표 (원점 -200000, 4000000 / 타일 256 / L18 해상도 0.25 가정)
+const TILE = { L5:[2,3], L6:[4,7], L7:[8,15], L8:[17,31], L9:[35,62], L10:[70,124], L11:[140,249],
+               L12:[281,499], L13:[563,999], L14:[1126,1999], L15:[2253,3999], L16:[4507,7999],
+               L17:[9014,15999], L18:[18029,31999], L19:[36059,63998] };
+
+function url(layer, lvl) {
+  const t = TILE[lvl];
+  return "https://map.ngii.go.kr/openapi/Gettile.do?apikey=" + encodeURIComponent(NGII_KEY) +
+    "&layer=" + layer + "&style=korean&tilematrixset=EPSG%3A5179&Service=WMTS&Request=GetTile" +
+    "&Version=1.0.0&Format=image%2Fpng&TileMatrix=" + lvl + "&TileCol=" + t[0] + "&TileRow=" + t[1];
+}
+function probe(layer, lvl) {
+  return new Promise(function (res) {
+    const img = new Image();
+    const done = function (ok) { res({ ok: ok, w: img.naturalWidth || 0, h: img.naturalHeight || 0 }); };
+    img.onload = function () { done(true); };
+    img.onerror = function () { done(false); };
+    setTimeout(function () { done(false); }, 9000);
+    img.src = url(layer, lvl);
+  });
+}
+function chip(parent, label, ok, extra) {
+  const s = document.createElement("span");
+  s.className = "chip " + (ok ? "ok" : "no");
+  s.textContent = label + (ok ? " ○" : " ×") + (extra ? " " + extra : "");
+  document.getElementById(parent).appendChild(s);
+}
+
+const lines = [];
+(async function () {
+  lines.push("[페이지] " + location.href);
+
+  lines.push("[1. 배경지도 이름별 · L14]");
+  const okLayers = [];
+  for (const L of LAYERS) {
+    const r = await probe(L, "L14");
+    chip("byLayer", L, r.ok, r.ok ? r.w + "px" : "");
+    lines.push("  " + L + " : " + (r.ok ? "받음 " + r.w + "x" + r.h : "실패"));
+    if (r.ok) okLayers.push(L);
+  }
+
+  const ref = okLayers.indexOf("satellite_map") >= 0 ? "satellite_map" : (okLayers[0] || "satellite_map");
+  lines.push("[2. 확대 단계별 · " + ref + "]");
+  for (const lvl of Object.keys(TILE)) {
+    const r = await probe(ref, lvl);
+    chip("byLevel", lvl, r.ok);
+    lines.push("  " + lvl + " : " + (r.ok ? "받음 " + r.w + "x" + r.h : "실패"));
+  }
+
+  const shots = document.getElementById("shots");
+  okLayers.slice(0, 6).forEach(function (L) {
+    const fig = document.createElement("figure");
+    const im = document.createElement("img");
+    im.src = url(L, "L14"); im.alt = L;
+    const cap = document.createElement("figcaption"); cap.textContent = L;
+    fig.appendChild(im); fig.appendChild(cap); shots.appendChild(fig);
+  });
+
+  lines.push("[3. 그림 미리보기] 화면에서 눈으로 확인");
+
+  // 지도 규격 정보
+  let capsText = "";
+  try {
+    const r = await fetch("https://map.ngii.go.kr/openapi/Gettile.do?apikey=" + encodeURIComponent(NGII_KEY) +
+      "&Service=WMTS&Request=GetCapabilities&Version=1.0.0");
+    const t = await r.text();
+    const ids = (t.match(/<ows:Identifier>[^<]*<\/ows:Identifier>/g) || []).slice(0, 40)
+      .map(function (s) { return s.replace(/<[^>]+>/g, ""); });
+    const tl = (t.match(/<TopLeftCorner>[^<]*<\/TopLeftCorner>/g) || []).slice(0, 3)
+      .map(function (s) { return s.replace(/<[^>]+>/g, ""); });
+    const sd = (t.match(/<ScaleDenominator>[^<]*<\/ScaleDenominator>/g) || []).slice(0, 20)
+      .map(function (s) { return s.replace(/<[^>]+>/g, ""); });
+    capsText = "이름: " + ids.join(", ") + "\n좌상단: " + tl.join(" | ") + "\n축척: " + sd.join(", ");
+  } catch (e) {
+    capsText = "규격 정보를 직접 읽지 못했습니다 (" + e.message + ") — 위 1·2번 결과로 판단합니다.";
+  }
+  document.getElementById("caps").textContent = capsText;
+  lines.push("[4. 지도 규격]");
+  capsText.split("\n").forEach(function (l) { lines.push("  " + l); });
+
+  lines.push("[5. 요약] 사용 가능한 이름: " + (okLayers.join(", ") || "없음"));
+  document.getElementById("out").textContent = lines.join("\n");
+})();
+
+document.getElementById("copy").addEventListener("click", function () {
+  const t = document.getElementById("out").textContent;
+  const btn = this;
+  (navigator.clipboard ? navigator.clipboard.writeText(t) : Promise.reject())
+    .then(function () { btn.textContent = "복사됨"; })
+    .catch(function () {
+      const r = document.createRange(); r.selectNodeContents(document.getElementById("out"));
+      const s = getSelection(); s.removeAllRanges(); s.addRange(r);
+      btn.textContent = "선택됨 · 길게 눌러 복사하세요";
+    });
+});
+</script>
+</body>
+</html>
