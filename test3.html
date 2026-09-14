@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>배경지도 진단 4차</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css">
+<script src="https://code.jquery.com/jquery-2.1.1.min.js"></script>
+<style>
+  :root { --ink:#1d2a33; --muted:#66727b; --ok:#1f6f5c; --fail:#b3261e; --line:#e3e8eb; }
+  body { margin:0; padding:20px; font-family:"Pretendard", system-ui, sans-serif; color:var(--ink); background:#f6f8f9; }
+  .card { max-width:760px; margin:0 auto; background:#fff; border-radius:12px; padding:20px; box-shadow:0 2px 14px rgba(29,42,51,.12); }
+  h1 { font-size:19px; margin:0 0 4px; }
+  p.sub { font-size:13px; color:var(--muted); margin:0 0 16px; line-height:1.55; }
+  h2 { font-size:14px; margin:18px 0 8px; padding-top:14px; border-top:1px solid var(--line); }
+  pre { background:#f3f6f7; border-radius:8px; padding:12px; font-size:12px; line-height:1.6; white-space:pre-wrap; word-break:break-all; margin:0; max-height:320px; overflow:auto; }
+  button { font:inherit; font-size:13.5px; font-weight:600; padding:9px 14px; border:1px solid var(--ok); color:var(--ok); background:#fff; border-radius:7px; cursor:pointer; margin-top:14px; }
+  .shots { display:flex; gap:10px; flex-wrap:wrap; }
+  .shots figure { margin:0; text-align:center; font-size:11px; color:var(--muted); width:150px; }
+  .shots img { width:150px; height:150px; object-fit:contain; border:1px solid var(--line); border-radius:6px; background:#eee; display:block; }
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>배경지도 진단 4차</h1>
+  <p class="sub">지난번 진단에서 지도 그림이 모두 거절됐습니다. 이번에는 서버가 왜 거절하는지 그 답변 내용을 그대로 읽습니다.</p>
+
+  <h2>1. 예전에 성공했던 그 주소 그대로</h2>
+  <div class="shots">
+    <figure><img id="imgA" alt="예전 성공 주소"><figcaption>영상지도 L18 (지난 성공)</figcaption></figure>
+    <figure><img id="imgB" alt="계산한 주소"><figcaption>영상지도 L14 (계산값)</figcaption></figure>
+  </div>
+
+  <h2>2. 서버 답변 그대로 보기</h2>
+  <pre id="raw">확인 중…</pre>
+
+  <h2>3. 요약</h2>
+  <pre id="out">확인 중…</pre>
+  <button id="copy" type="button">진단 내용 복사</button>
+</div>
+
+<script>
+// ▼ 국토정보플랫폼 인증키를 따옴표 안에 붙여넣으세요
+const NGII_KEY = "여기에_인증키를_붙여넣으세요";
+
+const BASE = "https://map.ngii.go.kr/openapi/Gettile.do";
+// 지난 진단에서 실제로 성공했던 요청 (영상지도, L18)
+const URL_A = BASE + "?apikey=" + encodeURIComponent(NGII_KEY) +
+  "&layer=satellite_map&style=korean&tilematrixset=EPSG%3A5179&Service=WMTS&Request=GetTile" +
+  "&Version=1.0.0&Format=image%2Fpng&TileMatrix=L18&TileCol=17777&TileRow=31865";
+// 내가 계산한 좌표 (영상지도, L14, 서울시청)
+const URL_B = BASE + "?apikey=" + encodeURIComponent(NGII_KEY) +
+  "&layer=satellite_map&style=korean&tilematrixset=EPSG%3A5179&Service=WMTS&Request=GetTile" +
+  "&Version=1.0.0&Format=image%2Fpng&TileMatrix=L14&TileCol=1126&TileRow=1999";
+const URL_C = BASE + "?apikey=" + encodeURIComponent(NGII_KEY) + "&Service=WMTS&Request=GetCapabilities&Version=1.0.0";
+
+const lines = ["[페이지] " + location.href];
+function mask(s) { return String(s).split(NGII_KEY).join("***"); }
+
+function probeImg(id, url, label) {
+  return new Promise(function (res) {
+    const img = document.getElementById(id);
+    let done = false;
+    const fin = function (ok) {
+      if (done) return; done = true;
+      lines.push("  " + label + " : " + (ok ? "받음 " + img.naturalWidth + "x" + img.naturalHeight : "실패"));
+      res(ok);
+    };
+    img.onload = function () { fin(true); };
+    img.onerror = function () { fin(false); };
+    setTimeout(function () { fin(false); }, 9000);
+    img.src = url;
+  });
+}
+
+async function readBody(url, label) {
+  const out = [];
+  try {
+    const r = await fetch(url, { credentials: "include" });
+    out.push(label + " — 응답코드 " + r.status + " / 형식 " + (r.headers.get("content-type") || "?"));
+    const ct = r.headers.get("content-type") || "";
+    if (ct.indexOf("image") === 0) {
+      const b = await r.blob();
+      out.push("  그림으로 받음 (" + b.size + " 바이트)");
+    } else {
+      const t = await r.text();
+      out.push("  내용: " + mask(t.replace(/\s+/g, " ").slice(0, 400)));
+    }
+  } catch (e) {
+    out.push(label + " — 읽지 못함: " + e.message);
+  }
+  return out.join("\n");
+}
+
+(async function () {
+  lines.push("[1. 그림 요청]");
+  await probeImg("imgA", URL_A, "영상지도 L18 (지난 성공 주소)");
+  await probeImg("imgB", URL_B, "영상지도 L14 (계산 주소)");
+
+  const parts = [];
+  parts.push(await readBody(URL_A, "① 타일 요청 (L18)"));
+  parts.push(await readBody(URL_C, "② 규격 정보 요청"));
+
+  // 지도 스크립트를 불러온 뒤 다시 시도 (접속 세션이 필요한지 확인)
+  await new Promise(function (res) {
+    const s = document.createElement("script");
+    s.src = "https://map.ngii.go.kr/openapi/wmts_ngiiMap_v6.4.3.js?apikey=" + encodeURIComponent(NGII_KEY);
+    s.onload = function () { res(true); };
+    s.onerror = function () { res(false); };
+    document.head.appendChild(s);
+    setTimeout(function () { res(false); }, 9000);
+  });
+  lines.push("[2. 지도 스크립트] ngii_wmts : " + (typeof ngii_wmts));
+  parts.push(await readBody(URL_A, "③ 스크립트 불러온 뒤 타일 요청"));
+
+  document.getElementById("raw").textContent = parts.join("\n\n");
+  lines.push("[3. 서버 답변]");
+  parts.join("\n").split("\n").forEach(function (l) { lines.push("  " + l); });
+  document.getElementById("out").textContent = lines.join("\n");
+})();
+
+document.getElementById("copy").addEventListener("click", function () {
+  const t = document.getElementById("out").textContent;
+  const btn = this;
+  (navigator.clipboard ? navigator.clipboard.writeText(t) : Promise.reject())
+    .then(function () { btn.textContent = "복사됨"; })
+    .catch(function () {
+      const r = document.createRange(); r.selectNodeContents(document.getElementById("out"));
+      const s = getSelection(); s.removeAllRanges(); s.addRange(r);
+      btn.textContent = "선택됨 · 길게 눌러 복사하세요";
+    });
+});
+</script>
+</body>
+</html>
